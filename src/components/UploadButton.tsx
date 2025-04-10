@@ -1,15 +1,16 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useUploadThing } from "~/utils/uploadthing";
+import { Upload } from "lucide-react";
 
 interface UploadButtonProps {
   files: File[];
   setFiles: (files: File[]) => void;
   isUploading: boolean;
   setIsUploading: (isUploading: boolean) => void;
-  startUpload: (files: File[]) => void;
+  startUpload: (files: File[]) => Promise<{ url: string }[] | undefined>;
   postId?: string;
-  setImageUrl: (url: string) => void;
+  setImageUrl: (url: string | undefined) => void;
 }
 
 export function UploadButton({ 
@@ -21,15 +22,27 @@ export function UploadButton({
   postId,
   setImageUrl
 }: UploadButtonProps) {
+  const [preview, setPreview] = useState<string | null>(null);
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(acceptedFiles);
+    // Create preview
+    const file = acceptedFiles[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   }, [setFiles]);
 
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.gif']
-    }
+    },
+    maxFiles: 1,
   });
 
   const { startUpload: uploadThingStartUpload } = useUploadThing("imageUploader", {
@@ -49,27 +62,30 @@ export function UploadButton({
   });
 
   return (
-    <div className="flex flex-col items-center justify-center">
+    <div className="flex flex-col gap-2">
       <div
         {...getRootProps()}
-        className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-gray-400"
+        className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-gray-400 transition-colors"
       >
         <input {...getInputProps()} />
-        {files.length > 0 ? (
-          <div>
-            <p>{files.length} file(s) selected</p>
-            <button
-              onClick={() => uploadThingStartUpload(files)}
-              disabled={isUploading}
-              className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
-            >
-              {isUploading ? "Uploading..." : "Upload"}
-            </button>
-          </div>
+        {isUploading ? (
+          <p>Uploading...</p>
         ) : (
-          <p>Drag & drop files here, or click to select files</p>
+          <div className="flex flex-col items-center gap-2">
+            <Upload className="h-6 w-6" />
+            <p>Drag and drop an image, or click to select</p>
+          </div>
         )}
       </div>
+      {preview && (
+        <div className="mt-2">
+          <img 
+            src={preview} 
+            alt="Preview" 
+            className="max-h-48 w-auto rounded-lg object-cover"
+          />
+        </div>
+      )}
     </div>
   );
 } 

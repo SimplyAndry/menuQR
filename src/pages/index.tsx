@@ -16,7 +16,6 @@ const postSchema = z.object({
   text: z.string().min(1, 'Text is required'),
   price: z.number(),
   ingredients: z.string().min(1, 'Ingredients is required'),
-  type: z.string().optional(),
   imageUrl: z.string().optional(),
 });
 
@@ -28,8 +27,11 @@ interface MenuItem {
   text: string;
   price: number;
   ingredients: string;
-  type?: string | null;
   imageUrl?: string | null;
+  category: {
+    id: string;
+    name: string;
+  };
 }
 
 interface Page {
@@ -41,7 +43,7 @@ const IndexPage: NextPageWithLayout = () => {
   const utils = trpc.useUtils();
   const postsQuery = trpc.post.list.useInfiniteQuery(
     {
-      limit: 50,
+      limit: 60,
     },
     {
       getNextPageParam(lastPage) {
@@ -55,7 +57,11 @@ const IndexPage: NextPageWithLayout = () => {
       await utils.post.list.invalidate();
     },
   });
-
+  const updatePost = trpc.post.update.useMutation({
+    async onSuccess() {
+      await utils.post.list.invalidate();
+    },
+  });
   // Initialize React Hook Form
   const {
     register,
@@ -73,7 +79,42 @@ const IndexPage: NextPageWithLayout = () => {
   const [uploadedPostId, setUploadedPostId] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [isAddingProduct, setIsAddingProduct] = useState(false);
-  const [isAddingToCategory, setIsAddingToCategory] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [editingPost, setEditingPost] = useState<MenuItem | null>(null);
+  const [editingCategoryId, setEditingCategoryId] = useState('');
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  
+  const { data: categories } = trpc.category.list.useQuery();
+  
+  const createCategory = trpc.category.create.useMutation({
+    onSuccess: () => {
+      setNewCategoryName('');
+      setIsAddingCategory(false);
+      utils.category.list.invalidate();
+      utils.post.list.invalidate();
+      // Force a refetch of the posts to update groupedItems
+      postsQuery.refetch();
+    },
+  });
+
+  const updateCategory = trpc.category.update.useMutation({
+    onSuccess: () => {
+      setNewCategoryName('');
+      setIsAddingCategory(false);
+      utils.category.list.invalidate();
+      utils.post.list.invalidate();
+    },
+  });
+
+  const deleteCategory = trpc.category.delete.useMutation({
+    onSuccess: () => {
+      utils.category.list.invalidate();
+      utils.post.list.invalidate();
+    },
+  });
 
   const { startUpload } = useUploadThing("imageUploader", {
     headers: () => ({
@@ -104,11 +145,71 @@ const IndexPage: NextPageWithLayout = () => {
     resolver: zodResolver(postSchema),
   });
 
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newCategoryName.trim()) {
+      if (editingCategoryId) {
+        await updateCategory.mutateAsync({ 
+          id: editingCategoryId, 
+          name: newCategoryName.trim() 
+        });
+        setEditingCategoryId('');
+      } else {
+        await createCategory.mutateAsync({ name: newCategoryName.trim() });
+      }
+    }
+  };
+
+  const handleEditPost = (post: MenuItem) => {
+    setEditingPost(post);
+    setValue('title', post.title);
+    setValue('text', post.text);
+    setValue('price', post.price);
+    setValue('ingredients', post.ingredients);
+    setImageUrl(post.imageUrl || undefined);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingPost(null);
+    reset();
+    setFiles([]);
+    setImageUrl(undefined);
+  };
+
+  const onSubmitEdit: SubmitHandler<PostFormData> = async (data) => {
+    if (!editingPost) return;
+    
+    try {
+      let newImageUrl: string | undefined = editingPost.imageUrl || undefined;
+      
+      if (files.length > 0) {
+        setIsUploading(true);
+        const uploadResult = await startUpload(files);
+        if (uploadResult && uploadResult[0]?.url) {
+          newImageUrl = uploadResult[0].url;
+        }
+        setIsUploading(false);
+      }
+
+      await updatePost.mutateAsync({
+        id: editingPost.id,
+        ...data,
+        price: Number(data.price),
+        ingredients: data.ingredients,
+        imageUrl: newImageUrl,
+        categoryId: editingPost.category.id,
+      });
+      
+      handleCancelEdit();
+    } catch (error) {
+      console.error('Failed to update post:', error);
+    }
+  };
+
   const onSubmit: SubmitHandler<PostFormData> = async (data) => {
     try {
       let imageUrl = undefined;
       
-      // If there are files to upload, upload them first
       if (files.length > 0) {
         setIsUploading(true);
         const uploadResult = await startUpload(files);
@@ -118,48 +219,18 @@ const IndexPage: NextPageWithLayout = () => {
         setIsUploading(false);
       }
 
-      // Create the post with the image URL
       const result = await addPost.mutateAsync({
         ...data,
         price: Number(data.price),
         ingredients: data.ingredients,
-        type: data.type,
+        categoryId: selectedCategoryId,
         imageUrl: imageUrl,
       });
       
       reset();
       setFiles([]);
       setImageUrl(undefined);
-    } catch (error) {
-      console.error('Failed to add post:', error);
-    }
-  };
-
-  const onSubmitCategory: SubmitHandler<PostFormData> = async (data) => {
-    try {
-      let imageUrl = undefined;
-      
-      if (files.length > 0) {
-        setIsUploading(true);
-        const uploadResult = await startUpload(files);
-        if (uploadResult && uploadResult[0]?.url) {
-          imageUrl = uploadResult[0].url;
-        }
-        setIsUploading(false);
-      }
-
-      const result = await addPost.mutateAsync({
-        ...data,
-        price: Number(data.price),
-        ingredients: data.ingredients,
-        type: isAddingToCategory || data.type,
-        imageUrl: imageUrl,
-      });
-      
-      resetCategory();
-      setFiles([]);
-      setImageUrl(undefined);
-      setIsAddingToCategory(null);
+      setSelectedCategoryId('');
     } catch (error) {
       console.error('Failed to add post:', error);
     }
@@ -168,14 +239,22 @@ const IndexPage: NextPageWithLayout = () => {
   // Group items by category
   const groupedItems = postsQuery.data?.pages.reduce((acc, page) => {
     page.items.forEach((item) => {
-      const category = item.type || 'Uncategorized';
+      const category = item.category.name || 'Uncategorized';
       if (!acc[category]) {
         acc[category] = [];
       }
       acc[category].push(item);
     });
     return acc;
-  }, {} as Record<string, MenuItem[]>);
+  }, {} as Record<string, MenuItem[]>) || {};
+
+  // Add empty categories to the grouped items
+  const allCategories = categories?.map(cat => cat.name) || [];
+  allCategories.forEach(category => {
+    if (!groupedItems[category]) {
+      groupedItems[category] = [];
+    }
+  });
 
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => ({
@@ -185,20 +264,42 @@ const IndexPage: NextPageWithLayout = () => {
   };
 
   const handleAddProduct = (category: string) => {
-    setValueCategory('type', category);
-    setIsAddingToCategory(category);
+    const categoryObj = categories?.find(cat => cat.name === category);
+    if (categoryObj) {
+      setIsAddingProduct(true);
+      setSelectedCategoryId(categoryObj.id);
+    }
   };
 
   const handleCloseCategoryForm = () => {
-    setIsAddingToCategory(null);
+    setSelectedCategoryId('');
     resetCategory();
   };
 
-  const scrollToForm = () => {
-    const formElement = document.getElementById('main-form');
-    if (formElement) {
-      formElement.scrollIntoView({ behavior: 'smooth' });
-      setIsAddingProduct(true);
+  const handleDeleteCategory = async (categoryId: string, categoryName: string, hasItems: boolean) => {
+    if (hasItems) {
+      const confirmed = window.confirm(`Sei sicuro di voler eliminare la categoria "${categoryName}" e tutti i suoi prodotti?`);
+      if (!confirmed) return;
+    }
+    await deleteCategory.mutateAsync({ id: categoryId });
+  };
+
+  const handleEditCategory = (category: { id: string; name: string }) => {
+    setEditingCategoryId(category.id);
+    setEditingCategoryName(category.name);
+    setIsEditingCategory(true);
+  };
+
+  const handleUpdateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingCategoryName.trim()) {
+      await updateCategory.mutateAsync({ 
+        id: editingCategoryId, 
+        name: editingCategoryName.trim() 
+      });
+      setIsEditingCategory(false);
+      setEditingCategoryId('');
+      setEditingCategoryName('');
     }
   };
 
@@ -208,29 +309,76 @@ const IndexPage: NextPageWithLayout = () => {
         <h1 className="text-4xl font-bold">
           Menu QR
         </h1>
-        <button
-          onClick={scrollToForm}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
-        >
-          Aggiungi nuovo prodotto
-        </button>
       </div>
       <p className="text-white-400 mb-8">
         Scegli cosa vuoi ordinare.
       </p>
 
       <div className="space-y-4">
-        {groupedItems && Object.entries(groupedItems).map(([category, items]) => (
+        {Object.entries(groupedItems || {}).map(([category, items]) => (
           <div key={category} className="border border-gray-700 rounded-lg overflow-hidden">
-            <button
-              onClick={() => toggleCategory(category)}
-              className="w-full p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center"
-            >
-              <h2 className="text-2xl font-semibold">{category}</h2>
-              <span className="text-xl">
-                {expandedCategories[category] ? '▼' : '▶'}
-              </span>
-            </button>
+            <div className="w-full p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center">
+              <button
+                onClick={() => toggleCategory(category)}
+                className="flex-1 flex justify-between items-center"
+              >
+                <h2 className="text-2xl font-semibold">{category}</h2>
+                <span className="text-xl">
+                  {expandedCategories[category] ? '▼' : '▶'}
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  const categoryObj = categories?.find(cat => cat.name === category);
+                  if (categoryObj) {
+                    handleDeleteCategory(categoryObj.id, category, items.length > 0);
+                  }
+                }}
+                className="ml-4 p-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-semibold"
+                title="Elimina categoria"
+              >
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="20" 
+                  height="20" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                </svg>
+              </button>
+              <button
+                onClick={() => {
+                  const categoryObj = categories?.find(cat => cat.name === category);
+                  if (categoryObj) {
+                    handleEditCategory(categoryObj);
+                  }
+                }}
+                className="ml-2 p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold"
+                title="Modifica categoria"
+              >
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="20" 
+                  height="20" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                >
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+              </button>
+            </div>
             
             {expandedCategories[category] && (
               <div className="p-4">
@@ -240,135 +388,335 @@ const IndexPage: NextPageWithLayout = () => {
                     <article 
                       key={item.id} 
                       className="bg-gray-900 p-6 rounded-lg hover:bg-gray-800 transition-colors"
-                    ><Link 
-                    className="text-blue-400 hover:text-blue-300 mt-4 inline-block" 
-                    href={`/post/${item.id}`}
-                  >
-                      <h3 className="text-2xl font-semibold mb-2">{item.title}</h3>
-                      {item.imageUrl && (
-                        <img 
-                          src={item.imageUrl} 
-                          alt={item.title}
-                          className="w-full h-48 object-cover rounded-lg mb-4"
-                        />
+                    >
+                      {editingPost?.id === item.id ? (
+                        <form onSubmit={handleSubmit(onSubmitEdit)} className="space-y-4">
+                          <div className="flex justify-between items-start mb-4">
+                            <input
+                              className="text-2xl font-semibold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
+                              {...register('title')}
+                              type="text"
+                              placeholder="Nome prodotto"
+                              disabled={isSubmitting}
+                            />
+                            <button
+                              type="submit"
+                              className="p-2 bg-green-600 hover:bg-green-700 rounded-lg text-white"
+                              title="Salva modifiche"
+                            >
+                              <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                width="20" 
+                                height="20" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round"
+                              >
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                              </svg>
+                            </button>
+                          </div>
+                          {item.imageUrl && (
+                            <div className="relative group">
+                              <img 
+                                src={item.imageUrl} 
+                                alt={item.title}
+                                className="w-full h-48 object-cover rounded-lg mb-4"
+                              />
+                              {editingPost?.id === item.id && (
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    <UploadButton 
+                                      files={files}
+                                      setFiles={setFiles}
+                                      isUploading={isUploading}
+                                      setIsUploading={setIsUploading}
+                                      startUpload={startUpload}
+                                      setImageUrl={setImageUrl}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <textarea
+                            className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-300"
+                            {...register('text')}
+                            placeholder="Descrizione"
+                            disabled={isSubmitting}
+                            rows={2}
+                          />
+                          <input
+                            className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-400"
+                            {...register('ingredients')}
+                            type="text"
+                            placeholder="Ingredienti"
+                            disabled={isSubmitting}
+                          />
+                          <div className="flex justify-between items-center">
+                            <input
+                              className="text-xl font-bold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-24"
+                              {...register('price', { valueAsNumber: true })}
+                              type="number"
+                              step="0.01"
+                              placeholder="Prezzo"
+                              disabled={isSubmitting}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleCancelEdit}
+                              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
+                            >
+                              Annulla
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <div className="flex justify-between items-start mb-4">
+                            <h3 className="text-2xl font-semibold">{item.title}</h3>
+                            <button
+                              onClick={() => handleEditPost(item)}
+                              className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
+                              title="Modifica prodotto"
+                            >
+                              <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                width="20" 
+                                height="20" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round"
+                              >
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                              </svg>
+                            </button>
+                          </div>
+                          <Link 
+                            className="text-blue-400 hover:text-blue-300 mt-4 inline-block" 
+                            href={`/post/${item.id}`}
+                          >
+                            {item.imageUrl && (
+                              <div className="relative group">
+                                <img 
+                                  src={item.imageUrl} 
+                                  alt={item.title}
+                                  className="w-full h-48 object-cover rounded-lg mb-4"
+                                />
+                                {editingPost?.id === item.id && (
+                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                      <UploadButton 
+                                        files={files}
+                                        setFiles={setFiles}
+                                        isUploading={isUploading}
+                                        setIsUploading={setIsUploading}
+                                        startUpload={startUpload}
+                                        setImageUrl={setImageUrl}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-gray-300 mb-2">{item.text}</p>
+                            <p className="text-gray-400 mb-2">{item.ingredients}</p>
+                            <p className="text-xl font-bold text-white">€{item.price.toFixed(2)}</p>
+                          </Link>
+                        </>
                       )}
-                      <p className="text-gray-300 mb-2">{item.text}</p>
-                      <p className="text-gray-400 mb-2">{item.ingredients}</p>
-                      <p className="text-xl font-bold text-white">€{item.price.toFixed(2)}</p>
-                      
-                        View details
-                     </Link>
                     </article> 
                   ))}
                   
                   {/* Add Product Card */}
                   <article 
-                    className="bg-gray-900 h-48 p-6 rounded-lg hover:bg-gray-800 transition-colors border-2 border-dashed border-gray-700 flex items-center justify-center cursor-pointer"
-                    onClick={() => handleAddProduct(category)}
+                    className={`bg-gray-900 p-6 rounded-lg hover:bg-gray-800 transition-colors ${
+                      isAddingProduct && selectedCategoryId === categories?.find(cat => cat.name === category)?.id
+                        ? 'border-2 border-solid border-green-500'
+                        : 'border-2 border-dashed border-gray-700'
+                    }`}
+                    onClick={() => !isAddingProduct && handleAddProduct(category)}
                   >
-                    <div className="text-center">
-                      <span className="text-4xl mb-2">+</span>
-                      <p className="text-gray-400">Aggiungi prodotto</p>
-                    </div>
+                    {isAddingProduct && selectedCategoryId === categories?.find(cat => cat.name === category)?.id ? (
+                      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                        <div className="flex justify-between items-start mb-4">
+                          <input
+                            className="text-2xl font-semibold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
+                            {...register('title')}
+                            type="text"
+                            placeholder="Nome prodotto"
+                            disabled={isSubmitting}
+                          />
+                          <button
+                            type="submit"
+                            className="p-2 bg-green-600 hover:bg-green-700 rounded-lg text-white"
+                            title="Salva prodotto"
+                          >
+                            <svg 
+                              xmlns="http://www.w3.org/2000/svg" 
+                              width="20" 
+                              height="20" 
+                              viewBox="0 0 24 24" 
+                              fill="none" 
+                              stroke="currentColor" 
+                              strokeWidth="2" 
+                              strokeLinecap="round" 
+                              strokeLinejoin="round"
+                            >
+                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                              <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                          </button>
+                        </div>
+                        <textarea
+                          className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-300"
+                          {...register('text')}
+                          placeholder="Descrizione"
+                          disabled={isSubmitting}
+                          rows={2}
+                        />
+                        <input
+                          className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-400"
+                          {...register('ingredients')}
+                          type="text"
+                          placeholder="Ingredienti"
+                          disabled={isSubmitting}
+                        />
+                        <div className="flex justify-between items-center">
+                          <input
+                            className="text-xl font-bold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-24"
+                            {...register('price', { valueAsNumber: true })}
+                            type="number"
+                            step="0.01"
+                            placeholder="Prezzo"
+                            disabled={isSubmitting}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAddingProduct(false);
+                              setSelectedCategoryId('');
+                              reset();
+                              setFiles([]);
+                            }}
+                            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
+                          >
+                            Annulla
+                          </button>
+                        </div>
+                        <div className="relative group">
+                          <div className="w-full h-48 bg-gray-800 rounded-lg mb-4 flex items-center justify-center">
+                            <UploadButton 
+                              files={files}
+                              setFiles={setFiles}
+                              isUploading={isUploading}
+                              setIsUploading={setIsUploading}
+                              startUpload={startUpload}
+                              setImageUrl={setImageUrl}
+                            />
+                          </div>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="text-center h-full flex items-center justify-center">
+                        <div>
+                          <span className="text-4xl mb-2">+</span>
+                          <p className="text-gray-400">Aggiungi prodotto</p>
+                        </div>
+                      </div>
+                    )}
                   </article>
                 </div>
               </div>
             )}
           </div>
         ))}
+        
+        {/* Add New Category Button */}
+        <div className="border border-gray-700 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setIsAddingCategory(true)}
+            className="w-full p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center"
+          >
+            <h2 className="text-2xl font-semibold">+ Nuova Categoria</h2>
+          </button>
+        </div>
       </div>
 
-      {/* Category-specific Add Product Form Modal */}
-      {isAddingToCategory && (
+      {/* Edit Category Modal */}
+      {isEditingCategory && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg max-w-2xl w-full mx-4">
-            <h2 className="text-2xl font-bold mb-4">Aggiungi Prodotto a {isAddingToCategory}</h2>
-            <form
-              className="py-2"
-              onSubmit={handleSubmitCategory(onSubmitCategory)}
-            >
-              <div className="flex flex-col gap-y-4 font-semibold">
-                <div className="flex flex-col gap-y-1">
-                  <input
-                    className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                    {...registerCategory('title')}
-                    type="text"
-                    placeholder="Nome prodotto"
-                    disabled={isSubmittingCategory}
-                  />
-                  {errorsCategory.title && (
-                    <span className="text-red-500 text-sm">{errorsCategory.title.message}</span>
-                  )}
-                </div>
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold mb-4">Modifica Categoria</h2>
+            <form onSubmit={handleUpdateCategory} className="space-y-4">
+              <input
+                className="w-full p-2 rounded border bg-gray-900 border-gray-300"
+                type="text"
+                value={editingCategoryName}
+                onChange={(e) => setEditingCategoryName(e.target.value)}
+                placeholder="Nome categoria"
+              />
+              <div className="flex gap-4">
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
+                >
+                  Salva
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingCategory(false);
+                    setEditingCategoryId('');
+                    setEditingCategoryName('');
+                  }}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
+                >
+                  Annulla
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-                <div className="flex flex-col gap-y-1">
-                  <textarea
-                    className="resize-none focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                    {...registerCategory('text')}
-                    placeholder="Descrizione"
-                    disabled={isSubmittingCategory}
-                    rows={6}
-                  />
-                  {errorsCategory.text && (
-                    <span className="text-red-500 text-sm">{errorsCategory.text.message}</span>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-y-1">
-                  <input
-                    className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                    {...registerCategory('price', { valueAsNumber: true })}
-                    type="number"
-                    step="0.01"
-                    placeholder="Prezzo"
-                    disabled={isSubmittingCategory}
-                  />
-                  {errorsCategory.price && (
-                    <span className="text-red-500 text-sm">{errorsCategory.price.message}</span>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-y-1">
-                  <input
-                    className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                    {...registerCategory('ingredients')}
-                    type="text"
-                    placeholder="Ingredienti"
-                    disabled={isSubmittingCategory}
-                  />
-                  {errorsCategory.ingredients && (
-                    <span className="text-red-500 text-sm">{errorsCategory.ingredients.message}</span>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-y-1">
-                  <label className="text-white">Foto</label>
-                  <UploadButton 
-                    files={files}
-                    setFiles={setFiles}
-                    isUploading={isUploading}
-                    setIsUploading={setIsUploading}
-                    startUpload={startUpload}
-                    setImageUrl={setImageUrl}
-                  />
-                </div>
-
-                <div className="flex justify-end gap-4">
-                  <button
-                    type="button"
-                    onClick={handleCloseCategoryForm}
-                    className="px-4 py-2 rounded bg-gray-600 hover:bg-gray-700"
-                  >
-                    Annulla
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmittingCategory}
-                    className="px-4 py-2 rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-600"
-                  >
-                    {isSubmittingCategory ? 'Salvataggio...' : 'Salva'}
-                  </button>
-                </div>
+      {/* Add Category Modal */}
+      {isAddingCategory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold mb-4">Nuova Categoria</h2>
+            <form onSubmit={handleCreateCategory} className="space-y-4">
+              <input
+                className="w-full p-2 rounded border bg-gray-900 border-gray-300"
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Nome categoria"
+              />
+              <div className="flex gap-4">
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
+                >
+                  Crea
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingCategory(false)}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
+                >
+                  Annulla
+                </button>
               </div>
             </form>
           </div>
@@ -384,118 +732,10 @@ const IndexPage: NextPageWithLayout = () => {
           ? 'Loading more...'
           : postsQuery.hasNextPage
             ? 'Load More'
-            : 'fine del menu'}
+            : 'Fine del Menù'}
       </button>
 
       <hr className="my-12 border-gray-700" />
-
-      <div id="main-form" className="flex flex-col py-8 items-center">
-        <button
-          onClick={() => setIsAddingProduct(!isAddingProduct)}
-          className="w-full max-w-2xl p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center rounded-lg mb-4"
-        >
-          <h2 className="text-2xl font-semibold">Aggiungi un prodotto</h2>
-          <span className="text-xl">
-            {isAddingProduct ? '▼' : '▶'}
-          </span>
-        </button>
-
-        {isAddingProduct && (
-          <form
-            className="py-2 w-full"
-            onSubmit={handleSubmit(onSubmit)}
-          >
-            <div className="flex flex-col gap-y-4 font-semibold">
-              <div className="flex flex-col gap-y-1">
-                <input
-                  className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                  {...register('title')}
-                  type="text"
-                  placeholder="Nome prodotto"
-                  disabled={isSubmitting}
-                />
-                {errors.title && (
-                  <span className="text-red-500 text-sm">{errors.title.message}</span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-y-1">
-                <textarea
-                  className="resize-none focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                  {...register('text')}
-                  placeholder="Descrizione"
-                  disabled={isSubmitting}
-                  rows={6}
-                />
-                {errors.text && (
-                  <span className="text-red-500 text-sm">{errors.text.message}</span>
-                )}
-              </div>
-              <div className="flex flex-col gap-y-1">
-                <input
-                  className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                  {...register('price', { valueAsNumber: true })}
-                  type="number"
-                  step="0.01"
-                  placeholder="Prezzo"
-                  disabled={isSubmitting}
-                />
-                {errors.price && (
-                  <span className="text-red-500 text-sm">{errors.price.message}</span>
-                )}
-              </div>
-              <div className="flex flex-col gap-y-1">
-                <input
-                  className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                  {...register('type')}
-                  type="text"
-                  placeholder="Categoria"
-                  disabled={isSubmitting}
-                />
-                {errors.type && (
-                  <span className="text-red-500 text-sm">{errors.type.message}</span>
-                )}
-              </div>
-              <div className="flex flex-col gap-y-1">
-                <input
-                  className="focus-visible:outline-dashed outline-offset-4 outline-2 outline-gray-700 rounded-xl px-4 py-3 bg-gray-900"
-                  {...register('ingredients')}
-                  type="text"
-                  placeholder="Ingredienti"
-                  disabled={isSubmitting}
-                />
-                {errors.ingredients && (
-                  <span className="text-red-500 text-sm">{errors.ingredients.message}</span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-y-1">
-                <label className="text-white">Foto</label>
-                <UploadButton 
-                  files={files}
-                  setFiles={setFiles}
-                  isUploading={isUploading}
-                  setIsUploading={setIsUploading}
-                  startUpload={startUpload}
-                  setImageUrl={setImageUrl}
-                />
-              </div>
-
-              <div className="flex justify-center">
-                <input
-                  className="cursor-pointer bg-gray-900 p-2 rounded-md px-16 disabled:opacity-50"
-                  type="submit"
-                  disabled={isSubmitting}
-                  value={isSubmitting ? 'Submitting...' : 'Submit'}
-                />
-                {addPost.error && (
-                  <p className="text-red-500 ml-2">{addPost.error.message}</p>
-                )}
-              </div>
-            </div>
-          </form>
-        )}
-      </div>
     </div>
   );
 };

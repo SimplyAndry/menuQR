@@ -14,7 +14,8 @@ model Menu {
   id          String   @id @default(cuid())
   title       String
   text        String
-  type        String?
+  category    Category @relation(fields: [categoryId], references: [id]) 
+  categoryId  String
   price       Float
   ingredients String
   imageUrl    String?
@@ -22,3 +23,8 @@ model Menu {
   updatedAt   DateTime @updatedAt
 }
 
+model Category{
+  id          String   @id @default(cuid())
+  name        String @unique
+  menuitem    Menu[]
+}

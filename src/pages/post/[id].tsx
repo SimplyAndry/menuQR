@@ -8,7 +8,20 @@ import type { NextPageWithLayout } from '~/pages/_app';
 import type { RouterOutput } from '~/utils/trpc';
 import { trpc } from '~/utils/trpc';
 
-type PostByIdOutput = RouterOutput['post']['byId'];
+type PostByIdOutput = {
+  id: string;
+  title: string;
+  text: string;
+  price: number;
+  ingredients: string;
+  imageUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  category: {
+    id: string;
+    name: string;
+  };
+};
 
 function PostItem(props: { post: PostByIdOutput }) {
   const { post } = props;
@@ -20,7 +33,7 @@ function PostItem(props: { post: PostByIdOutput }) {
     text: post.text,
     price: post.price,
     ingredients: post.ingredients,
-    type: post.type || '',
+    categoryId: post.category.id,
   });
 
   const updateMutation = trpc.post.update.useMutation({
@@ -111,10 +124,10 @@ function PostItem(props: { post: PostByIdOutput }) {
           <div className="space-y-2">
             <input
               className="w-full p-2 rounded border border-gray-300"
-              name="type"
-              value={formData.type}
+              name="categoryId"
+              value={formData.categoryId}
               onChange={handleChange}
-              placeholder="Category"
+              placeholder="Category ID"
             />
           </div>
 

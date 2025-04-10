@@ -17,13 +17,65 @@ const defaultPostSelect = {
   id: true,
   title: true,
   text: true,
-  type: true,
   price: true,
   ingredients: true,
   imageUrl: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.MenuSelect;
+
+const selectWithCategory = {
+  ...defaultPostSelect,
+  category: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} as const;
+
+export const categoryRouter = router({
+  create: publicProcedure
+    .input(
+      z.object({
+        name: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      return prisma.category.create({
+        data: input,
+      });
+    }),
+  update: publicProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      return prisma.category.update({
+        where: { id: input.id },
+        data: { name: input.name },
+      });
+    }),
+  list: publicProcedure
+    .query(async () => {
+      return prisma.category.findMany();
+    }),
+  delete: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      // Delete all menu items in this category first
+      await prisma.menu.deleteMany({
+        where: { categoryId: input.id },
+      });
+      // Then delete the category
+      return prisma.category.delete({
+        where: { id: input.id },
+      });
+    }),
+});
 
 export const postRouter = router({
   list: publicProcedure
@@ -44,8 +96,7 @@ export const postRouter = router({
       const { cursor } = input;
 
       const items = await prisma.menu.findMany({
-        select: defaultPostSelect,
-        // get an extra item at the end which we'll use as next cursor
+        select: selectWithCategory,
         take: limit + 1,
         where: {},
         cursor: cursor
@@ -80,7 +131,7 @@ export const postRouter = router({
       const { id } = input;
       const post = await prisma.menu.findUnique({
         where: { id },
-        select: defaultPostSelect,
+        select: selectWithCategory,
       });
       if (!post) {
         throw new TRPCError({
@@ -98,14 +149,14 @@ export const postRouter = router({
         text: z.string().min(1),
         price: z.number().min(0),
         ingredients: z.string().min(1),
-        type: z.string().optional(),
+        categoryId: z.string(),
         imageUrl: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
       const post = await prisma.menu.create({
         data: input,
-        select: defaultPostSelect,
+        select: selectWithCategory,
       });
       return post;
     }),
@@ -128,7 +179,7 @@ export const postRouter = router({
       return prisma.menu.update({
         where: { id },
         data: { imageUrl },
-        select: defaultPostSelect,
+        select: selectWithCategory,
       });
     }),
   update: publicProcedure
@@ -139,20 +190,15 @@ export const postRouter = router({
         text: z.string(),
         price: z.number(),
         ingredients: z.string(),
-        type: z.string().optional(),
+        categoryId: z.string(),
+        imageUrl: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
       return prisma.menu.update({
         where: { id: input.id },
-        data: {
-          title: input.title,
-          text: input.text,
-          price: input.price,
-          ingredients: input.ingredients,
-          type: input.type,
-        },
-        select: defaultPostSelect,
+        data: input,
+        select: selectWithCategory,
       });
     }),
 });
