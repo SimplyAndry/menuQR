@@ -28,3 +28,4 @@ model Category{
   name        String @unique
   menuitem    Menu[]
 }
+

@@ -9,7 +9,6 @@ import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUploadThing } from '~/utils/uploadthing';
-
 // Define the form schema
 const postSchema = z.object({
   title: z.string().min(1, 'Title is required').max(32, 'Title must be less than 32 characters'),
@@ -43,7 +42,7 @@ const IndexPage: NextPageWithLayout = () => {
   const utils = trpc.useUtils();
   const postsQuery = trpc.post.list.useInfiniteQuery(
     {
-      limit: 60,
+      limit: 80,
     },
     {
       getNextPageParam(lastPage) {
@@ -86,6 +85,7 @@ const IndexPage: NextPageWithLayout = () => {
   const [editingCategoryId, setEditingCategoryId] = useState('');
   const [isEditingCategory, setIsEditingCategory] = useState(false);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [selectedPost, setSelectedPost] = useState<MenuItem | null>(null);
   
   const { data: categories } = trpc.category.list.useQuery();
   
@@ -124,13 +124,13 @@ const IndexPage: NextPageWithLayout = () => {
       if (res && res[0]?.ufsUrl && uploadedPostId) {
         // Qui possiamo aggiornare il post con l'URL dell'immagine
         // usando una nuova mutation che dovrai creare nel router
-        alert("Upload Completed!");
+        alert("Immagine caricata!");
         setFiles([]);
         setUploadedPostId(null);
       }
     },
     onUploadError: (error: Error) => {
-      alert(`ERROR! ${error.message}`);
+      alert(`ERRORE! ${error.message}`);
     },
   });
 
@@ -227,10 +227,12 @@ const IndexPage: NextPageWithLayout = () => {
         imageUrl: imageUrl,
       });
       
+      // Reset di tutti gli stati
       reset();
       setFiles([]);
       setImageUrl(undefined);
       setSelectedCategoryId('');
+      setIsAddingProduct(false);
     } catch (error) {
       console.error('Failed to add post:', error);
     }
@@ -268,6 +270,10 @@ const IndexPage: NextPageWithLayout = () => {
     if (categoryObj) {
       setIsAddingProduct(true);
       setSelectedCategoryId(categoryObj.id);
+      // Reset del form quando si aggiunge un nuovo prodotto
+      reset();
+      setFiles([]);
+      setImageUrl(undefined);
     }
   };
 
@@ -303,6 +309,64 @@ const IndexPage: NextPageWithLayout = () => {
     }
   };
 
+  const PostModal = ({ post, onClose }: { post: MenuItem; onClose: () => void }) => {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-gray-900 p-8 rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-start mb-4">
+            <h2 className="text-3xl font-bold">{post.title}</h2>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white"
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="24" 
+                height="24" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          {post.imageUrl && (
+            <div className="my-4">
+              <img 
+                src={post.imageUrl} 
+                alt={post.title}
+                className="w-full h-64 object-cover rounded-lg"
+              />
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Descrizione</h3>
+              <p className="text-gray-300">{post.text}</p>
+            </div>
+
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Ingredienti</h3>
+              <p className="text-gray-300">{post.ingredients}</p>
+            </div>
+
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Prezzo</h3>
+              <p className="text-2xl font-bold text-white">€{post.price.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col bg-gray-800 text-white py-8 px-8">
       <div className="flex justify-between items-center mb-8">
@@ -322,7 +386,39 @@ const IndexPage: NextPageWithLayout = () => {
                 onClick={() => toggleCategory(category)}
                 className="flex-1 flex justify-between items-center"
               >
-                <h2 className="text-2xl font-semibold">{category}</h2>
+                {editingCategoryId === categories?.find(cat => cat.name === category)?.id ? (
+                  <form onSubmit={handleUpdateCategory} className="flex-1 flex items-center gap-4">
+                    <input
+                      className="flex p-2 rounded bg-transparent text-white text-xl outline-none"
+                      type="text"
+                      value={editingCategoryName}
+                      onChange={(e) => setEditingCategoryName(e.target.value)}
+                      placeholder="Nome categoria"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button
+                      type="submit"
+                      className="px-2 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Salva
+                    </button>
+                    {/* <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsEditingCategory(false);
+                        setEditingCategoryId('');
+                        setEditingCategoryName('');
+                      }}
+                      className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
+                    >
+                      Annulla
+                    </button> */}
+                  </form>
+                ) : (
+                  <h2 className="text-2xl font-semibold">{category}</h2>
+                )}
                 <span className="text-xl">
                   {expandedCategories[category] ? '▼' : '▶'}
                 </span>
@@ -353,31 +449,33 @@ const IndexPage: NextPageWithLayout = () => {
                   <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
                 </svg>
               </button>
-              <button
-                onClick={() => {
-                  const categoryObj = categories?.find(cat => cat.name === category);
-                  if (categoryObj) {
-                    handleEditCategory(categoryObj);
-                  }
-                }}
-                className="ml-2 p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold"
-                title="Modifica categoria"
-              >
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
+              {!editingCategoryId && (
+                <button
+                  onClick={() => {
+                    const categoryObj = categories?.find(cat => cat.name === category);
+                    if (categoryObj) {
+                      handleEditCategory(categoryObj);
+                    }
+                  }}
+                  className="ml-2 p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold"
+                  title="Modifica categoria"
                 >
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
-              </button>
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    width="20" 
+                    height="20" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+              )}
             </div>
             
             {expandedCategories[category] && (
@@ -393,7 +491,7 @@ const IndexPage: NextPageWithLayout = () => {
                         <form onSubmit={handleSubmit(onSubmitEdit)} className="space-y-4">
                           <div className="flex justify-between items-start mb-4">
                             <input
-                              className="text-2xl font-semibold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
+                              className="text-2xl font-semibold outline-none bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
                               {...register('title')}
                               type="text"
                               placeholder="Nome prodotto"
@@ -438,21 +536,21 @@ const IndexPage: NextPageWithLayout = () => {
                                       setIsUploading={setIsUploading}
                                       startUpload={startUpload}
                                       setImageUrl={setImageUrl}
-                                    />
+                                    /> 
                                   </div>
                                 </div>
                               )}
                             </div>
                           )}
                           <textarea
-                            className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-300"
+                            className="w-full p-2 bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none text-gray-300"
                             {...register('text')}
                             placeholder="Descrizione"
                             disabled={isSubmitting}
                             rows={2}
                           />
                           <input
-                            className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-400"
+                            className="w-full p-2 bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none text-gray-400"
                             {...register('ingredients')}
                             type="text"
                             placeholder="Ingredienti"
@@ -460,7 +558,7 @@ const IndexPage: NextPageWithLayout = () => {
                           />
                           <div className="flex justify-between items-center">
                             <input
-                              className="text-xl font-bold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-24"
+                              className="text-xl font-bold bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none w-24"
                               {...register('price', { valueAsNumber: true })}
                               type="number"
                               step="0.01"
@@ -501,9 +599,9 @@ const IndexPage: NextPageWithLayout = () => {
                               </svg>
                             </button>
                           </div>
-                          <Link 
-                            className="text-blue-400 hover:text-blue-300 mt-4 inline-block" 
-                            href={`/post/${item.id}`}
+                          <button 
+                            onClick={() => setSelectedPost(item)}
+                            className="text-blue-400 hover:text-blue-300 mt-4 inline-block w-full text-left"
                           >
                             {item.imageUrl && (
                               <div className="relative group">
@@ -512,26 +610,12 @@ const IndexPage: NextPageWithLayout = () => {
                                   alt={item.title}
                                   className="w-full h-48 object-cover rounded-lg mb-4"
                                 />
-                                {editingPost?.id === item.id && (
-                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
-                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                      <UploadButton 
-                                        files={files}
-                                        setFiles={setFiles}
-                                        isUploading={isUploading}
-                                        setIsUploading={setIsUploading}
-                                        startUpload={startUpload}
-                                        setImageUrl={setImageUrl}
-                                      />
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             )}
                             <p className="text-gray-300 mb-2">{item.text}</p>
                             <p className="text-gray-400 mb-2">{item.ingredients}</p>
                             <p className="text-xl font-bold text-white">€{item.price.toFixed(2)}</p>
-                          </Link>
+                          </button>
                         </>
                       )}
                     </article> 
@@ -544,13 +628,24 @@ const IndexPage: NextPageWithLayout = () => {
                         ? 'border-2 border-solid border-green-500'
                         : 'border-2 border-dashed border-gray-700'
                     }`}
-                    onClick={() => !isAddingProduct && handleAddProduct(category)}
+                    onClick={() => {
+                      if (!isAddingProduct) {
+                        const categoryObj = categories?.find(cat => cat.name === category);
+                        if (categoryObj) {
+                          setIsAddingProduct(true);
+                          setSelectedCategoryId(categoryObj.id);
+                          reset();
+                          setFiles([]);
+                          setImageUrl(undefined);
+                        }
+                      }
+                    }}
                   >
                     {isAddingProduct && selectedCategoryId === categories?.find(cat => cat.name === category)?.id ? (
                       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                         <div className="flex justify-between items-start mb-4">
                           <input
-                            className="text-2xl font-semibold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
+                            className="text-2xl font-semibold outline-none bg-transparent border-gray-700 focus:border-blue-500 outline-none w-full"
                             {...register('title')}
                             type="text"
                             placeholder="Nome prodotto"
@@ -578,15 +673,28 @@ const IndexPage: NextPageWithLayout = () => {
                             </svg>
                           </button>
                         </div>
+                        <div className="relative group">
+                          <div className="w-full h-48 bg-gray-800 rounded-lg mb-4 flex items-center justify-center">
+                            <UploadButton 
+                              files={files}
+                              setFiles={setFiles}
+                              isUploading={isUploading}
+                              setIsUploading={setIsUploading}
+                              startUpload={startUpload}
+                              setImageUrl={setImageUrl}
+                            />
+                          </div>
+                        </div>
                         <textarea
-                          className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-300"
+                          className="w-full p-2 bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none text-gray-300"
                           {...register('text')}
                           placeholder="Descrizione"
                           disabled={isSubmitting}
                           rows={2}
                         />
+                        
                         <input
-                          className="w-full p-2 bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none text-gray-400"
+                          className="w-full p-2 bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none text-gray-400"
                           {...register('ingredients')}
                           type="text"
                           placeholder="Ingredienti"
@@ -594,7 +702,7 @@ const IndexPage: NextPageWithLayout = () => {
                         />
                         <div className="flex justify-between items-center">
                           <input
-                            className="text-xl font-bold bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-24"
+                            className="text-xl font-bold bg-transparent outline-none border-gray-700 focus:border-blue-500 outline-none w-24"
                             {...register('price', { valueAsNumber: true })}
                             type="number"
                             step="0.01"
@@ -614,18 +722,7 @@ const IndexPage: NextPageWithLayout = () => {
                             Annulla
                           </button>
                         </div>
-                        <div className="relative group">
-                          <div className="w-full h-48 bg-gray-800 rounded-lg mb-4 flex items-center justify-center">
-                            <UploadButton 
-                              files={files}
-                              setFiles={setFiles}
-                              isUploading={isUploading}
-                              setIsUploading={setIsUploading}
-                              startUpload={startUpload}
-                              setImageUrl={setImageUrl}
-                            />
-                          </div>
-                        </div>
+                        
                       </form>
                     ) : (
                       <div className="text-center h-full flex items-center justify-center">
@@ -644,66 +741,16 @@ const IndexPage: NextPageWithLayout = () => {
         
         {/* Add New Category Button */}
         <div className="border border-gray-700 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setIsAddingCategory(true)}
-            className="w-full p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center"
-          >
-            <h2 className="text-2xl font-semibold">+ Nuova Categoria</h2>
-          </button>
-        </div>
-      </div>
-
-      {/* Edit Category Modal */}
-      {isEditingCategory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold mb-4">Modifica Categoria</h2>
-            <form onSubmit={handleUpdateCategory} className="space-y-4">
-              <input
-                className="w-full p-2 rounded border bg-gray-900 border-gray-300"
-                type="text"
-                value={editingCategoryName}
-                onChange={(e) => setEditingCategoryName(e.target.value)}
-                placeholder="Nome categoria"
-              />
-              <div className="flex gap-4">
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
-                >
-                  Salva
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditingCategory(false);
-                    setEditingCategoryId('');
-                    setEditingCategoryName('');
-                  }}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
-                >
-                  Annulla
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add Category Modal */}
-      {isAddingCategory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold mb-4">Nuova Categoria</h2>
-            <form onSubmit={handleCreateCategory} className="space-y-4">
-              <input
-                className="w-full p-2 rounded border bg-gray-900 border-gray-300"
-                type="text"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="Nome categoria"
-              />
-              <div className="flex gap-4">
+          {isAddingCategory ? (
+            <form onSubmit={handleCreateCategory} className="p-4 bg-gray-900">
+              <div className="flex items-center gap-4">
+                <input
+                  className="flex-1 p-2 rounded border bg-gray-800 border-gray-700 text-white"
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Nome categoria"
+                />
                 <button
                   type="submit"
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-semibold"
@@ -712,30 +759,35 @@ const IndexPage: NextPageWithLayout = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsAddingCategory(false)}
+                  onClick={() => {
+                    setIsAddingCategory(false);
+                    setNewCategoryName('');
+                  }}
                   className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-semibold"
                 >
                   Annulla
                 </button>
               </div>
             </form>
-          </div>
+          ) : (
+            <button
+              onClick={() => setIsAddingCategory(true)}
+              className="w-full p-4 bg-gray-900 hover:bg-gray-800 flex justify-between items-center"
+            >
+              <h2 className="text-2xl font-semibold">Nuova Categoria</h2>
+            </button>
+          )}
         </div>
-      )}
-
-      <button
-        className="bg-gray-900 p-2 rounded-md font-semibold disabled:bg-gray-700 disabled:text-white-400 mt-8"
-        onClick={() => postsQuery.fetchNextPage()}
-        disabled={!postsQuery.hasNextPage || postsQuery.isFetchingNextPage}
-      >
-        {postsQuery.isFetchingNextPage
-          ? 'Loading more...'
-          : postsQuery.hasNextPage
-            ? 'Load More'
-            : 'Fine del Menù'}
-      </button>
+      </div>
 
       <hr className="my-12 border-gray-700" />
+
+      {selectedPost && (
+        <PostModal 
+          post={selectedPost} 
+          onClose={() => setSelectedPost(null)} 
+        />
+      )}
     </div>
   );
 };

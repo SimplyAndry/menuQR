@@ -73,7 +73,7 @@ export function UploadButton({
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Upload className="h-6 w-6" />
-            <p>Drag and drop an image, or click to select</p>
+            <p>Seleziona immagine</p>
           </div>
         )}
       </div>
