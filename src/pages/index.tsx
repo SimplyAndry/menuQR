@@ -61,6 +61,12 @@ const IndexPage: NextPageWithLayout = () => {
       await utils.post.list.invalidate();
     },
   });
+  const deletePost = trpc.post.delete.useMutation({
+    async onSuccess() {
+      await utils.post.list.invalidate();
+    },
+  });
+
   // Initialize React Hook Form
   const {
     register,
@@ -115,6 +121,8 @@ const IndexPage: NextPageWithLayout = () => {
       utils.post.list.invalidate();
     },
   });
+
+  
 
   const { startUpload } = useUploadThing("imageUploader", {
     headers: () => ({
@@ -311,28 +319,24 @@ const IndexPage: NextPageWithLayout = () => {
 
   const PostModal = ({ post, onClose }: { post: MenuItem; onClose: () => void }) => {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-gray-900 p-8 rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div 
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        onClick={onClose}
+      >
+        <div 
+          className="bg-gray-900 p-8 rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="flex justify-between items-start mb-4">
             <h2 className="text-3xl font-bold">{post.title}</h2>
             <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-white"
+              onClick={() => {
+                deletePost.mutate({ id: post.id });
+                onClose();
+              }}
+              className="bg-red-700 text-white rounded-md p-2 hover:bg-red-600 transition-colors"
             >
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width="24" 
-                height="24" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              Delete
             </button>
           </div>
 
@@ -491,7 +495,7 @@ const IndexPage: NextPageWithLayout = () => {
                         <form onSubmit={handleSubmit(onSubmitEdit)} className="space-y-4">
                           <div className="flex justify-between items-start mb-4">
                             <input
-                              className="text-2xl font-semibold outline-none bg-transparent border-b border-gray-700 focus:border-blue-500 outline-none w-full"
+                              className="text-2xl font-semibold outline-none bg-transparent border-gray-700 focus:border-blue-500 outline-none w-full"
                               {...register('title')}
                               type="text"
                               placeholder="Nome prodotto"
@@ -576,11 +580,29 @@ const IndexPage: NextPageWithLayout = () => {
                         </form>
                       ) : (
                         <>
+                          
+                          <button 
+                            onClick={() => setSelectedPost(item)}
+                            className="text-white-300 hover:text-blue-300 inline-block w-full text-left"
+                          >
+                            <h3 className="text-2xl text-white-300 font-semibold mb-4">{item.title}</h3>
+                            {item.imageUrl && (
+                              <div className="relative group">
+                                <img 
+                                  src={item.imageUrl} 
+                                  alt={item.title}
+                                  className="w-full h-48 object-cover rounded-lg mb-4"
+                                />
+                              </div>
+                            )}
+                            <p className="text-gray-300 mb-2">{item.text}</p>
+                            <p className="text-gray-400 mb-2">{item.ingredients}</p>
+                            <p className="text-xl font-bold text-white">€{item.price.toFixed(2)}</p>
+                          </button>
                           <div className="flex justify-between items-start mb-4">
-                            <h3 className="text-2xl font-semibold">{item.title}</h3>
                             <button
                               onClick={() => handleEditPost(item)}
-                              className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
+                              className="p-2 mt-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
                               title="Modifica prodotto"
                             >
                               <svg 
@@ -599,23 +621,6 @@ const IndexPage: NextPageWithLayout = () => {
                               </svg>
                             </button>
                           </div>
-                          <button 
-                            onClick={() => setSelectedPost(item)}
-                            className="text-blue-400 hover:text-blue-300 mt-4 inline-block w-full text-left"
-                          >
-                            {item.imageUrl && (
-                              <div className="relative group">
-                                <img 
-                                  src={item.imageUrl} 
-                                  alt={item.title}
-                                  className="w-full h-48 object-cover rounded-lg mb-4"
-                                />
-                              </div>
-                            )}
-                            <p className="text-gray-300 mb-2">{item.text}</p>
-                            <p className="text-gray-400 mb-2">{item.ingredients}</p>
-                            <p className="text-xl font-bold text-white">€{item.price.toFixed(2)}</p>
-                          </button>
                         </>
                       )}
                     </article> 
